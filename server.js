@@ -81,7 +81,14 @@ const server = http.createServer(async (req, res) => {
   const можно =
     (req.method === 'POST' && (путь === '/' || путь === '/chat/completions' ||
                                путь === '/videos' || путь === '/images/generations')) ||
-    (req.method === 'GET'  && (путь === '/models' || /^\/videos\/[A-Za-z0-9_.:-]+$/.test(путь)));
+    (req.method === 'GET'  && (путь === '/models' ||
+                               /^\/videos\/[A-Za-z0-9_.:-]+$/.test(путь) ||
+                               /* Сам файл ролика: /videos/{номер}/content.
+                                  19 августа — без этого пути готовое видео
+                                  качалось напрямую с openrouter.ai и упиралось
+                                  в 403 по стране, то есть ровно в то, ради
+                                  чего пересыльщик и поднят. */
+                               /^\/videos\/[A-Za-z0-9_.:-]+\/content$/.test(путь)));
 
   if(!можно){
     return say(res, 405, { error: 'Такой путь пересыльщик не обслуживает' });
