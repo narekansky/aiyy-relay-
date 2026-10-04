@@ -82,6 +82,39 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* ФОТО ИЗ ПОСТА ТЕЛЕГРАМ-КАНАЛА. 5 октября, разрешение хозяина: «давай делай».
+     Новости из каналов приходят без картинок: с российского сервера не открываются
+     ни t.me, ни сервера картинок Телеграма. Путь /tgphoto/канал/номер открывает
+     публичный пост t.me/канал/номер?embed=1, находит в нём первое фото (или обложку
+     видео) и отдаёт эту картинку. Пересыльщик ходит только на t.me и на картинки
+     Телеграма (telesco.pe, telegram.org, cdn-telegram.org) — никакой адрес снаружи сюда передать
+     нельзя. Только GET и только с нашим паролем. */
+  {
+    const тф = /^\/tgphoto\/([A-Za-z0-9_]{4,32})\/(\d{1,9})\/?$/.exec((req.url || '').split('?')[0]);
+    if(тф){
+      if(req.method !== 'GET') return say(res, 405, { error: 'Только чтение' });
+      if(!SECRET || req.headers['x-aiyy-relay'] !== SECRET) return say(res, 403, { error: 'Нельзя' });
+      try{
+        const ua = { 'user-agent': 'Mozilla/5.0 (compatible; AiyyBot/1.0)' };
+        const r = await fetch('https://t.me/' + тф[1] + '/' + тф[2] + '?embed=1&mode=tme', { headers: ua, signal: AbortSignal.timeout(15000) });
+        const html = (await r.text()).slice(0, 1500000);
+        const м = /tgme_widget_message_(?:photo_wrap|video_thumb)[^>]*background-image:\s*url\(['"]?(https:\/\/[^'")\s]+)/i.exec(html);
+        if(!м) return say(res, 404, { error: 'В посте нет фото' });
+        const адрес = м[1].replace(/&amp;/g, '&');
+        const хост = new URL(адрес).hostname.toLowerCase();
+        if(!/(^|\.)(telesco\.pe|telegram\.org|telegram-cdn\.org|cdn-telegram\.org|t\.me)$/.test(хост)) return say(res, 404, { error: 'Чужой адрес картинки' });
+        const к = await fetch(адрес, { headers: ua, signal: AbortSignal.timeout(15000) });
+        const тип = к.headers.get('content-type') || '';
+        if(!к.ok || !/^image\//i.test(тип)) return say(res, 404, { error: 'Картинка не скачалась' });
+        const буф = Buffer.from(await к.arrayBuffer());
+        if(буф.length > 12 * 1024 * 1024) return say(res, 413, { error: 'Слишком большая' });
+        res.writeHead(200, { 'Content-Type': тип, 'Content-Length': буф.length });
+        res.end(буф);
+      }catch(e){ say(res, 502, { error: 'Телеграм не ответил: ' + e.message }); }
+      return;
+    }
+  }
+
   /* ЧТО ИМЕННО ПЕРЕСЫЛАЕМ.
 
      19 августа. Раньше был один путь: любой POST уходил на чат-вход.
