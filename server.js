@@ -62,6 +62,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  /* ОТКРЫТАЯ СТРАНИЦА ТЕЛЕГРАМ-КАНАЛА. 5 октября, разрешение хозяина: «да давай
+     попробуем». С российского сервера t.me не открывается, отсюда — да. Только
+     чтение публичной страницы t.me/s/имя (то, что видит любой без входа), только
+     GET, только имя канала из латиницы и цифр, только с нашим паролем. К OpenRouter
+     и остальным путям (чат, видео, речь, озвучка) это не относится и их не трогает. */
+  {
+    const тг = /^\/tg\/([A-Za-z0-9_]{4,32})\/?$/.exec((req.url || '').split('?')[0]);
+    if(тг){
+      if(req.method !== 'GET') return say(res, 405, { error: 'Только чтение' });
+      if(!SECRET || req.headers['x-aiyy-relay'] !== SECRET) return say(res, 403, { error: 'Нельзя' });
+      try{
+        const r = await fetch('https://t.me/s/' + тг[1], { headers: { 'user-agent': 'Mozilla/5.0 (compatible; AiyyBot/1.0)' }, signal: AbortSignal.timeout(15000) });
+        const html = await r.text();
+        res.writeHead(r.status, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html.slice(0, 2000000));
+      }catch(e){ say(res, 502, { error: 'Телеграм не ответил: ' + e.message }); }
+      return;
+    }
+  }
+
   /* ЧТО ИМЕННО ПЕРЕСЫЛАЕМ.
 
      19 августа. Раньше был один путь: любой POST уходил на чат-вход.
