@@ -115,6 +115,44 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* ПРЕВЬЮ НОВОСТЕЙ ДЛЯ ТЕЛЕГРАМА (7 октября, слово хозяина: «мне бы чтобы превью показывала в Телеграме»).
+     Робот Телеграма, делающий превью ссылки, до российского сервера не доходит (счётчик репостов — ноль), а сюда — доходит.
+     Ссылка на новость, которой делятся, ведёт сюда: /n/<новость>. Роботу мессенджера отдаём страницу новости с aisire.ru
+     (заголовок, текст, картинка — картинку тоже отсюда), живого человека сразу перекидываем на aisire.ru.
+     Ходим ТОЛЬКО на свой сайт (SITE_URL, по умолчанию https://aisire.ru) и только по путям новостей; пароль не нужен —
+     ровно то же самое и так открыто всем на aisire.ru. */
+  {
+    const путьН = (req.url || '').split('?')[0];
+    const хвостН = (req.url || '').indexOf('?') >= 0 ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+    const стр = /^\/n\/([a-z0-9-]{3,120})\/?$/.exec(путьН);
+    const фото = /^\/n\/([a-z0-9-]{3,120})\/photo$/.exec(путьН) || /^\/(news-og\.jpg|og\.jpg|logo\.png)$/.exec(путьН);
+    if((стр || фото) && req.method === 'GET'){
+      const САЙТ = (process.env.SITE_URL || 'https://aisire.ru').replace(/\/+$/, '');
+      const уа = String(req.headers['user-agent'] || '');
+      const робот = /bot\b|bot\/|crawl|spider|preview|^whatsapp|facebookexternalhit|facebot|vkshare|viber|skype|discord|slack|twitter/i.test(уа);
+      if(стр && !робот){ res.writeHead(302, { Location: САЙТ + путьН + хвостН, 'Cache-Control': 'no-store' }); return res.end(); }
+      try{
+        const r = await fetch(САЙТ + путьН + хвостН, { headers: { 'user-agent': уа || 'Mozilla/5.0 (compatible; AiyyRelay/1.0)' }, redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        if(фото){
+          const тип = r.headers.get('content-type') || '';
+          if(!r.ok || !/^image\//i.test(тип)) { res.writeHead(404); return res.end(); }
+          const буф = Buffer.from(await r.arrayBuffer());
+          if(буф.length > 12 * 1024 * 1024){ res.writeHead(413); return res.end(); }
+          res.writeHead(200, { 'Content-Type': тип, 'Content-Length': буф.length, 'Cache-Control': 'public, max-age=86400' });
+          return res.end(буф);
+        }
+        let html = (await r.text()).slice(0, 3000000);
+        /* Картинку превью — тоже отсюда: до aisire.ru робот не дотянется. */
+        const мы = 'https://' + String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+        if(/^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(мы)){
+          html = html.replace(/(<meta[^>]+(?:og:image|twitter:image)[^>]+content=")https:\/\/aisire\.ru(\/[^"]*")/gi, '$1' + мы + '$2');
+        }
+        res.writeHead(r.status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
+        return res.end(html);
+      }catch(e){ res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Сайт не ответил'); }
+    }
+  }
+
   /* ЧТО ИМЕННО ПЕРЕСЫЛАЕМ.
 
      19 августа. Раньше был один путь: любой POST уходил на чат-вход.
