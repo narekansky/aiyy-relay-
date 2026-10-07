@@ -153,6 +153,71 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* КЛИПЫ С YOUTUBE (7 октября, слово хозяина: «клипов мало… достань топ-плейлисты с YouTube, у большинства VPN включён»).
+     С российского сервера YouTube не открывается, отсюда — да. Три пути, только GET, только с нашим паролем,
+     ходим только на www.youtube.com и отдаём короткий список (номер ролика, название, канал, длина) — не страницы целиком:
+       /yt/search?q=…            поиск роликов
+       /yt/list/<плейлист>       ролики плейлиста
+       /yt/chan/<канал>          плейлисты канала (главная и «Плейлисты») */
+  {
+    const путьЮ = (req.url || '').split('?')[0];
+    const пЮ = /^\/yt\/(search|list|chan)(?:\/([A-Za-z0-9_-]{10,64}))?\/?$/.exec(путьЮ);
+    if(пЮ){
+      if(req.method !== 'GET') return say(res, 405, { error: 'Только чтение' });
+      if(!SECRET || req.headers['x-aiyy-relay'] !== SECRET) return say(res, 403, { error: 'Нельзя' });
+      const пар = new URL(req.url, 'http://x').searchParams;
+      const gl = /^[A-Z]{2}$/.test(пар.get('gl') || '') ? пар.get('gl') : 'RU';
+      const язык = '&hl=ru&gl=' + gl;
+      const заг = { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+        'accept-language': 'ru-RU,ru;q=0.9,en;q=0.8', 'cookie': 'SOCS=CAI; CONSENT=YES+cb' };
+      const данные = async function(адрес){
+        const r = await fetch(адрес, { headers: заг, redirect: 'follow', signal: AbortSignal.timeout(20000) });
+        const html = (await r.text()).slice(0, 6000000);
+        const м = /ytInitialData\s*=\s*(\{[\s\S]+?\});\s*<\/script>/.exec(html);
+        if(!м) throw new Error('нет данных на странице (' + r.status + ')');
+        return JSON.parse(м[1]);
+      };
+      const текст = function(т){ if(!т) return ''; if(typeof т === 'string') return т; if(т.simpleText) return т.simpleText; if(т.content) return т.content;
+        if(Array.isArray(т.runs)) return т.runs.map(function(р){ return р.text || ''; }).join(''); return ''; };
+      const обойти = function(о, f, глуб){ if(!о || typeof о !== 'object' || глуб > 60) return; if(Array.isArray(о)){ о.forEach(function(х){ обойти(х, f, глуб + 1); }); return; }
+        f(о); Object.keys(о).forEach(function(к){ const з = о[к]; if(з && typeof з === 'object') обойти(з, f, глуб + 1); }); };
+      const сек = function(т){ const ч = String(т || '').split(':').map(Number); if(!ч.length || ч.some(isNaN)) return 0; return ч.reduce(function(а, б){ return а * 60 + б; }, 0); };
+      try{
+        if(пЮ[1] === 'chan'){
+          if(!/^UC[A-Za-z0-9_-]{20,}$/.test(пЮ[2] || '')) return say(res, 400, { error: 'не канал' });
+          const списки = [], было = {};
+          for(const хв of ['', '/playlists']){
+            let д = null; try{ д = await данные('https://www.youtube.com/channel/' + пЮ[2] + хв + '?' + язык.slice(1)); }catch(e){ continue; }
+            обойти(д, function(о){
+              let ид = '', имя = '';
+              if(о.playlistId && (о.title)){ ид = о.playlistId; имя = текст(о.title); }
+              else if(о.contentId && /PLAYLIST/.test(String(о.contentType || ''))){ ид = о.contentId;
+                имя = текст(о.metadata && о.metadata.lockupMetadataViewModel && о.metadata.lockupMetadataViewModel.title); }
+              if(ид && имя && !было[ид] && /^(PL|OL|RD)[A-Za-z0-9_-]{10,}$/.test(ид)){ было[ид] = 1; списки.push({ id: ид, t: имя.slice(0, 160) }); }
+            }, 0);
+          }
+          return say(res, 200, { lists: списки.slice(0, 200) });
+        }
+        const адрес = пЮ[1] === 'search'
+          ? 'https://www.youtube.com/results?search_query=' + encodeURIComponent(String(пар.get('q') || '').slice(0, 200)) + '&sp=EgIQAQ%253D%253D' + язык
+          : 'https://www.youtube.com/playlist?list=' + пЮ[2] + язык;
+        if(пЮ[1] === 'search' && !пар.get('q')) return say(res, 400, { error: 'пустой поиск' });
+        if(пЮ[1] === 'list' && !пЮ[2]) return say(res, 400, { error: 'нет плейлиста' });
+        const д = await данные(адрес);
+        const ролики = [], было = {};
+        обойти(д, function(о){
+          if(!о.videoId || !о.title || было[о.videoId] || !/^[A-Za-z0-9_-]{11}$/.test(о.videoId)) return;
+          const имя = текст(о.title); if(!имя) return;
+          было[о.videoId] = 1;
+          const канал = текст(о.ownerText || о.shortBylineText || о.longBylineText);
+          const дл = Number(о.lengthSeconds || 0) || сек(текст(о.lengthText));
+          ролики.push({ id: о.videoId, t: имя.slice(0, 200), c: канал.slice(0, 100), len: дл, when: текст(о.publishedTimeText).slice(0, 40) });
+        }, 0);
+        return say(res, 200, { items: ролики.slice(0, 200) });
+      }catch(e){ return say(res, 502, { error: 'YouTube не ответил: ' + e.message }); }
+    }
+  }
+
   /* ЧТО ИМЕННО ПЕРЕСЫЛАЕМ.
 
      19 августа. Раньше был один путь: любой POST уходил на чат-вход.
