@@ -90,7 +90,9 @@ const server = http.createServer(async (req, res) => {
      Телеграма (telesco.pe, telegram.org, cdn-telegram.org) — никакой адрес снаружи сюда передать
      нельзя. Только GET и только с нашим паролем. */
   {
-    const тф = /^\/tgphoto\/([A-Za-z0-9_]{4,32})\/(\d{1,9})\/?$/.exec((req.url || '').split('?')[0]);
+    /* 14 октября, слово хозяина: карусель из новости должна брать ВСЕ фото поста-альбома, а не искать в сети.
+       /tgphoto/канал/номер/K — K-е фото альбома (с нуля); без K — первое, как раньше. */
+    const тф = /^\/tgphoto\/([A-Za-z0-9_]{4,32})\/(\d{1,9})(?:\/(\d{1,2}))?\/?$/.exec((req.url || '').split('?')[0]);
     if(тф){
       if(req.method !== 'GET') return say(res, 405, { error: 'Только чтение' });
       if(!SECRET || req.headers['x-aiyy-relay'] !== SECRET) return say(res, 403, { error: 'Нельзя' });
@@ -98,7 +100,9 @@ const server = http.createServer(async (req, res) => {
         const ua = { 'user-agent': 'Mozilla/5.0 (compatible; AiyyBot/1.0)' };
         const r = await fetch('https://t.me/' + тф[1] + '/' + тф[2] + '?embed=1&mode=tme', { headers: ua, signal: AbortSignal.timeout(15000) });
         const html = (await r.text()).slice(0, 1500000);
-        const м = /tgme_widget_message_(?:photo_wrap|video_thumb)[^>]*background-image:\s*url\(['"]?(https:\/\/[^'")\s]+)/i.exec(html);
+        const все = []; const reВсе = /tgme_widget_message_(?:photo_wrap|video_thumb)[^>]*background-image:\s*url\(['"]?(https:\/\/[^'")\s]+)/gi; let мм;
+        while((мм = reВсе.exec(html))){ if(все.indexOf(мм[1]) < 0) все.push(мм[1]); }
+        const м = все[Number(тф[3] || 0)] ? [null, все[Number(тф[3] || 0)]] : null;
         if(!м) return say(res, 404, { error: 'В посте нет фото' });
         const адрес = м[1].replace(/&amp;/g, '&');
         const хост = new URL(адрес).hostname.toLowerCase();
