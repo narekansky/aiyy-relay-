@@ -82,6 +82,33 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* БОТ АЙЫЫ В ТЕЛЕГРАМЕ (19 октября, разрешение хозяина: «да, так и делаем»). Сервер Айыы в России Телеграм не видит.
+     /tgbot/метод — вызов Bot API Телеграма (getUpdates, sendMessage, sendPhoto…), /tgfile/путь — файл, присланный боту
+     (фото). Ходим ТОЛЬКО на api.telegram.org. Ключ бота приходит в заголовке X-TG-Token с каждым запросом и здесь не
+     хранится. Только с нашим паролем. Остальные пути не трогаются. */
+  {
+    const путь = (req.url || '').split('?')[0];
+    const тб = /^\/tgbot\/([A-Za-z]{3,40})$/.exec(путь);
+    const тфл = /^\/tgfile\/([A-Za-z0-9_\-./]{3,200})$/.exec(путь);
+    if(тб || тфл){
+      if(!SECRET || req.headers['x-aiyy-relay'] !== SECRET) return say(res, 403, { error: 'Нельзя' });
+      const ключ = String(req.headers['x-tg-token'] || '');
+      if(!/^\d{5,15}:[A-Za-z0-9_-]{30,50}$/.test(ключ)) return say(res, 400, { error: 'Нет ключа бота' });
+      if(тфл && тфл[1].indexOf('..') >= 0) return say(res, 400, { error: 'Плохой путь' });
+      try{
+        const тело = (req.method === 'GET' || тфл) ? undefined : await readBody(req);
+        const адрес = тб ? 'https://api.telegram.org/bot' + ключ + '/' + тб[1] + ((req.url || '').indexOf('?') >= 0 ? (req.url || '').slice((req.url || '').indexOf('?')) : '')
+                         : 'https://api.telegram.org/file/bot' + ключ + '/' + тфл[1];
+        const r = await fetch(адрес, { method: тфл ? 'GET' : req.method, body: тело,
+          headers: тело ? { 'content-type': req.headers['content-type'] || 'application/json' } : {}, signal: AbortSignal.timeout(70000) });
+        const б = Buffer.from(await r.arrayBuffer());
+        res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/octet-stream' });
+        res.end(б);
+      }catch(e){ say(res, 502, { error: 'Телеграм не ответил: ' + e.message }); }
+      return;
+    }
+  }
+
   /* ФОТО ИЗ ПОСТА ТЕЛЕГРАМ-КАНАЛА. 5 октября, разрешение хозяина: «давай делай».
      Новости из каналов приходят без картинок: с российского сервера не открываются
      ни t.me, ни сервера картинок Телеграма. Путь /tgphoto/канал/номер открывает
@@ -116,6 +143,28 @@ const server = http.createServer(async (req, res) => {
         res.end(буф);
       }catch(e){ say(res, 502, { error: 'Телеграм не ответил: ' + e.message }); }
       return;
+    }
+  }
+
+  /* ПРЕВЬЮ РОЛИКА YOUTUBE (14 октября, слово хозяина: «без ВПН посты с видео в ленте пустые — будто сайт глючит»).
+     Из России i.ytimg.com не открывается, отсюда — да. /ytthumb/<номер ролика> — только картинка превью, только с нашим паролем. */
+  {
+    const пт = /^\/ytthumb\/([A-Za-z0-9_-]{11})\/?$/.exec((req.url || '').split('?')[0]);
+    if(пт){
+      if(req.method !== 'GET') return say(res, 405, { error: 'Только чтение' });
+      if(!SECRET || req.headers['x-aiyy-relay'] !== SECRET) return say(res, 403, { error: 'Нельзя' });
+      try{
+        for(const вид of ['maxresdefault', 'hqdefault']){
+          const к = await fetch('https://i.ytimg.com/vi/' + пт[1] + '/' + вид + '.jpg', { signal: AbortSignal.timeout(15000) });
+          const тип = к.headers.get('content-type') || '';
+          if(!к.ok || !/^image\//i.test(тип)) continue;
+          const буф = Buffer.from(await к.arrayBuffer());
+          if(буф.length < 2000 || буф.length > 4 * 1024 * 1024) continue;
+          res.writeHead(200, { 'Content-Type': тип, 'Content-Length': буф.length });
+          return res.end(буф);
+        }
+        return say(res, 404, { error: 'Нет превью' });
+      }catch(e){ return say(res, 502, { error: 'YouTube не ответил: ' + e.message }); }
     }
   }
 
