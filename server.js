@@ -109,6 +109,49 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* МОСТ К n8n (30 октября: с утра сервер Айыы в России не достаёт до n8n.aisire.99ai.app — адрес режут; бот @AIYKT_BOT
+     перестал отдавать цифры и тарифы). /n8n/webhook/… — только на наш n8n, только вебхуки, только с нашим паролем. */
+  {
+    const путьН8 = (req.url || '').split('?')[0];
+    const н8 = /^\/n8n\/(webhook\/[A-Za-z0-9_\-\/]{1,120})$/.exec(путьН8);
+    if(н8){
+      if(!SECRET || req.headers['x-aiyy-relay'] !== SECRET) return say(res, 403, { error: 'Нельзя' });
+      if(н8[1].indexOf('..') >= 0) return say(res, 400, { error: 'Плохой путь' });
+      try{
+        const тело = req.method === 'GET' ? undefined : await readBody(req);
+        const заг = {}; if(тело) заг['content-type'] = req.headers['content-type'] || 'application/json';
+        if(req.headers['x-aiyy-key']) заг['x-aiyy-key'] = String(req.headers['x-aiyy-key']);
+        const кв = (req.url || '').indexOf('?') >= 0 ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+        const r = await fetch((process.env.N8N_URL || 'https://n8n.aisire.99ai.app/') + н8[1] + кв, { method: req.method, body: тело, headers: заг, signal: AbortSignal.timeout(60000) });
+        const б = Buffer.from(await r.arrayBuffer());
+        res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json' });
+        res.end(б);
+      }catch(e){ say(res, 502, { error: 'n8n не ответил: ' + e.message }); }
+      return;
+    }
+  }
+
+  /* МОСТ К МОСКОВСКОМУ n8n ОПЛАТ (30 октября: сервер бота за границей не достаёт до yoo-n8n-2.aisire.ru — бот не создаёт ссылки
+     на оплату и автопродления). /yoo/webhook/… — только на этот адрес и только вебхуки; пароль у самого вебхука (Authorization
+     проходит насквозь), свой пароль пересыльщика здесь не нужен. */
+  {
+    const путьЮ2 = (req.url || '').split('?')[0];
+    const ю2 = /^\/yoo\/(webhook(?:-test)?\/[A-Za-z0-9_\-\/]{1,120})$/.exec(путьЮ2);
+    if(ю2){
+      if(ю2[1].indexOf('..') >= 0) return say(res, 400, { error: 'Плохой путь' });
+      try{
+        const тело = req.method === 'GET' ? undefined : await readBody(req);
+        const заг = {}; ['content-type', 'authorization', 'idempotence-key'].forEach(function(h){ if(req.headers[h]) заг[h] = String(req.headers[h]); });
+        const кв = (req.url || '').indexOf('?') >= 0 ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+        const r = await fetch((process.env.YOO_N8N_URL || 'https://yoo-n8n-2.aisire.ru/') + ю2[1] + кв, { method: req.method, body: тело, headers: заг, signal: AbortSignal.timeout(60000) });
+        const б = Buffer.from(await r.arrayBuffer());
+        res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json' });
+        res.end(б);
+      }catch(e){ say(res, 502, { error: 'сервер оплат не ответил: ' + e.message }); }
+      return;
+    }
+  }
+
   /* ФОТО ИЗ ПОСТА ТЕЛЕГРАМ-КАНАЛА. 5 октября, разрешение хозяина: «давай делай».
      Новости из каналов приходят без картинок: с российского сервера не открываются
      ни t.me, ни сервера картинок Телеграма. Путь /tgphoto/канал/номер открывает
