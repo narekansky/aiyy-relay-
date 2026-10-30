@@ -131,6 +131,26 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* УВЕДОМЛЕНИЯ ЮKASSA ДЛЯ БОТА (30 октября: ЮKassa из России не достаёт до n8n.aisire.99ai.app — оплаты в боте не подтверждаются).
+     В кабинете ЮKassa адрес уведомлений — /hook/yookassa_response_prod здесь; пересылаем как есть на тот же вебхук n8n.
+     Только POST и только этот вебхук — ровно то, что и так было открыто на n8n. */
+  {
+    const путьХ = (req.url || '').split('?')[0];
+    const хк = /^\/hook\/(yookassa_response_prod)$/.exec(путьХ);
+    if(хк){
+      if(req.method !== 'POST') return say(res, 405, { error: 'Только POST' });
+      try{
+        const тело = await readBody(req);
+        const r = await fetch((process.env.N8N_URL || 'https://n8n.aisire.99ai.app/') + 'webhook/' + хк[1], { method: 'POST', body: тело,
+          headers: { 'content-type': req.headers['content-type'] || 'application/json' }, signal: AbortSignal.timeout(60000) });
+        const б = Buffer.from(await r.arrayBuffer());
+        res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json' });
+        res.end(б);
+      }catch(e){ say(res, 502, { error: 'n8n не ответил: ' + e.message }); }
+      return;
+    }
+  }
+
   /* МОСТ К МОСКОВСКОМУ n8n ОПЛАТ (30 октября: сервер бота за границей не достаёт до yoo-n8n-2.aisire.ru — бот не создаёт ссылки
      на оплату и автопродления). /yoo/webhook/… — только на этот адрес и только вебхуки; пароль у самого вебхука (Authorization
      проходит насквозь), свой пароль пересыльщика здесь не нужен. */
