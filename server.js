@@ -75,6 +75,10 @@ function say(res, code, obj){
 const server = http.createServer(async (req, res) => {
   /* 2 ноября: вебхук Instagram (Meta) — пока DNS Beget лежит, Meta стучится сюда, а мы несём запрос
      на сайт по IP как есть (тело и подпись x-hub-signature-256 не меняем). */
+  if((req.url || '').split('?')[0] === '/ig/log' && req.headers['x-aiyy-key']){
+    try{ const с = await сайтПоIP('/api/ig/log', 'GET', { 'x-aiyy-key': String(req.headers['x-aiyy-key']) });
+      res.writeHead(с.status, { 'Content-Type': с.type }); return res.end(с.body); }catch(e){ return say(res, 502, { error: e.message }); }
+  }
   if((req.url || '').split('?')[0] === '/ig/hook'){
     try{
       const тело = req.method === 'GET' ? undefined : await readBody(req);
