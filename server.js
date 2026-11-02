@@ -79,6 +79,13 @@ const server = http.createServer(async (req, res) => {
     try{ const с = await сайтПоIP('/api/ig/log', 'GET', { 'x-aiyy-key': String(req.headers['x-aiyy-key']) });
       res.writeHead(с.status, { 'Content-Type': с.type }); return res.end(с.body); }catch(e){ return say(res, 502, { error: e.message }); }
   }
+  if((req.url || '').split('?')[0] === '/ig/probe' && req.headers['x-aiyy-key']){
+    const т0 = Date.now();
+    try{ const r = await fetch((process.env.N8N_URL || 'https://n8n.aisire.99ai.app/') + 'webhook/aiyy-ig', { method: 'POST', headers: { 'content-type': 'application/json', 'x-aiyy-key': String(req.headers['x-aiyy-key']) },
+        body: JSON.stringify({ url: 'https://graph.instagram.com/v21.0/me?fields=username', method: 'GET' }), signal: AbortSignal.timeout(30000) });
+      return say(res, 200, { n8n: process.env.N8N_URL || '(по умолчанию)', status: r.status, ms: Date.now() - т0, body: (await r.text()).slice(0, 300), relaySecret: !!SECRET });
+    }catch(e){ return say(res, 200, { n8n: process.env.N8N_URL || '(по умолчанию)', error: e.message, ms: Date.now() - т0 }); }
+  }
   if((req.url || '').split('?')[0] === '/ig/hook'){
     try{
       const тело = req.method === 'GET' ? undefined : await readBody(req);
