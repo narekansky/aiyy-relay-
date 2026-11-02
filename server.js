@@ -107,6 +107,23 @@ const server = http.createServer(async (req, res) => {
       }catch(e){ return say(res, 502, { error: 'сайт не ответил: ' + e.message }); }
     }
   }
+  /* 3 ноября: go.sprps.app не находится (DNS у Beget лежит), а сервер во Франкфурте жив. Несём запрос по IP с нужным именем.
+     Только пути админки /adm/<ключ>/… — ключ и есть пропуск. */
+  if(/^\/fra\/adm\/[A-Za-z0-9]{16,}\//.test(req.url || '')){
+    try{
+      const тело = req.method === 'POST' ? await readBody(req) : null;
+      const с = await new Promise(function(ok, no){
+        const h = { host: 'go.sprps.app', 'content-type': req.headers['content-type'] || 'application/json' };
+        if(тело) h['content-length'] = String(тело.length);
+        const r = https.request({ host: '154.222.8.237', servername: 'go.sprps.app', port: 443, path: req.url.slice(4), method: req.method, headers: h, timeout: 900000 }, function(o){
+          const ч = []; o.on('data', function(d){ ч.push(d); }); o.on('end', function(){ ok({ status: o.statusCode, type: o.headers['content-type'] || 'application/json', body: Buffer.concat(ч) }); });
+        });
+        r.on('timeout', function(){ r.destroy(new Error('timeout')); }); r.on('error', no);
+        if(тело) r.write(тело); r.end();
+      });
+      res.writeHead(с.status, { 'Content-Type': с.type }); return res.end(с.body);
+    }catch(e){ return say(res, 502, { error: 'франкфурт не ответил: ' + e.message }); }
+  }
   /* Проверка живости для панели хостинга. Ничего не рассказывает о себе. */
   if(req.url === '/health'){
     res.writeHead(200, { 'Content-Type': 'text/plain' });
