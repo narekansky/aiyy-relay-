@@ -95,6 +95,18 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(с.status, { 'Content-Type': с.type }); return res.end(с.body);
     }catch(e){ return say(res, 502, { error: 'сайт не ответил: ' + e.message }); }
   }
+  /* 3 ноября: n8n (Hostinger) не достаёт до сайта в Timeweb — вход через Telegram («не получилось связать») и кнопки бота
+     падали по таймауту. n8n зовёт сюда, мы несём запрос на сайт по IP. Только эти три пути и только с ключом x-aiyy-key. */
+  {
+    const ак = /^\/aiykt\/(bind|sitebtn|maxbtn)$/.exec((req.url || '').split('?')[0]);
+    if(ак && req.method === 'POST' && req.headers['x-aiyy-key']){
+      try{
+        const тело = await readBody(req);
+        const с = await сайтПоIP('/api/aiykt/' + ак[1], 'POST', { 'content-type': 'application/json', 'x-aiyy-key': String(req.headers['x-aiyy-key']) }, тело);
+        res.writeHead(с.status, { 'Content-Type': с.type }); return res.end(с.body);
+      }catch(e){ return say(res, 502, { error: 'сайт не ответил: ' + e.message }); }
+    }
+  }
   /* Проверка живости для панели хостинга. Ничего не рассказывает о себе. */
   if(req.url === '/health'){
     res.writeHead(200, { 'Content-Type': 'text/plain' });
