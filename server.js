@@ -73,6 +73,17 @@ function say(res, code, obj){
 }
 
 const server = http.createServer(async (req, res) => {
+  /* 2 ноября: вебхук Instagram (Meta) — пока DNS Beget лежит, Meta стучится сюда, а мы несём запрос
+     на сайт по IP как есть (тело и подпись x-hub-signature-256 не меняем). */
+  if((req.url || '').split('?')[0] === '/ig/hook'){
+    try{
+      const тело = req.method === 'GET' ? undefined : await readBody(req);
+      const заг = {}; ['content-type', 'x-hub-signature', 'x-hub-signature-256', 'user-agent'].forEach(function(h){ if(req.headers[h]) заг[h] = String(req.headers[h]); });
+      const кв = (req.url || '').indexOf('?') >= 0 ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+      const с = await сайтПоIP('/api/ig/hook' + кв, req.method, заг, тело);
+      res.writeHead(с.status, { 'Content-Type': с.type }); return res.end(с.body);
+    }catch(e){ return say(res, 502, { error: 'сайт не ответил: ' + e.message }); }
+  }
   /* Проверка живости для панели хостинга. Ничего не рассказывает о себе. */
   if(req.url === '/health'){
     res.writeHead(200, { 'Content-Type': 'text/plain' });
