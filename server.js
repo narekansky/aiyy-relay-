@@ -23,6 +23,24 @@
 
 const http = require('http');
 
+/* 2 ноября: DNS Beget лёг — имя aisire.ru не находится. До сайта ходим прямо по его адресу в Timeweb
+   (SITE_IP), а имя сайта отдаём в TLS и Host — так сертификат и маршрутизация Timeweb остаются прежними. */
+const https = require('https');
+const SITE_IP = process.env.SITE_IP || '147.45.153.2';
+function сайтПоIP(путь, метод, заг, тело){
+  return new Promise(function(ok, no){
+    const h = Object.assign({}, заг, { host: 'aisire.ru' });
+    if(тело) h['content-length'] = String(тело.length);
+    const r = https.request({ host: SITE_IP, servername: 'aisire.ru', port: 443, path: путь, method: метод, headers: h, timeout: 60000 }, function(o){
+      const ч = []; o.on('data', function(d){ ч.push(d); }); o.on('end', function(){ ok({ status: o.statusCode, type: o.headers['content-type'] || 'application/json', body: Buffer.concat(ч) }); });
+    });
+    r.on('timeout', function(){ r.destroy(new Error('timeout')); });
+    r.on('error', no);
+    if(тело) r.write(тело);
+    r.end();
+  });
+}
+
 const PORT   = process.env.PORT || 3000;
 const SECRET = process.env.RELAY_SECRET || '';
 const TARGET = process.env.TARGET_URL || 'https://openrouter.ai/api/v1/chat/completions';
@@ -163,6 +181,13 @@ const server = http.createServer(async (req, res) => {
         const тело = req.method === 'GET' ? undefined : await readBody(req);
         const заг = {}; ['content-type', 'authorization', 'idempotence-key'].forEach(function(h){ if(req.headers[h]) заг[h] = String(req.headers[h]); });
         const кв = (req.url || '').indexOf('?') >= 0 ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+        if(ю2[1] === 'webhook/create-link'){
+          /* Сайт сам создаёт платёж в ЮKassa (свой ключ бота) — московский n8n и DNS Beget не нужны. */
+          try{
+            const с = await сайтПоIP('/api/yoo/webhook/create-link' + кв, req.method, заг, тело);
+            if(с.status < 500){ res.writeHead(с.status, { 'Content-Type': с.type }); return res.end(с.body); }
+          }catch(e){ console.log('сайт по IP не ответил:', e.message); }
+        }
         const r = await fetch((process.env.YOO_N8N_URL || 'https://yoo-n8n-2.aisire.ru/') + ю2[1] + кв, { method: req.method, body: тело, headers: заг, signal: AbortSignal.timeout(60000) });
         const б = Buffer.from(await r.arrayBuffer());
         res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json' });
